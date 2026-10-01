@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"time"
-	"encoding/base64"
 	"crypto/subtle"
 	"net/http"
 	"net/http/httputil"
@@ -40,16 +39,7 @@ func logResponse(resp *http.Response) error {
 	return nil
 }
 
-
-func main() {
-	pcloudUser := "username"
-	pcloudPass := "password"
-	proxyUser := "testuser"
-	proxyPass := "testpass"
-
-	target, _ := url.Parse("https://127.0.0.1:8099")
-	creds := base64.StdEncoding.EncodeToString([]byte(pcloudUser + ":" + pcloudPass))
-	
+func NewReverseProxy(user, pass string, target *url.URL) *httputil.ReverseProxy {
 	customTransport := &http.Transport{
 		ResponseHeaderTimeout: 30 * time.Second,
 		IdleConnTimeout: 90 * time.Second,
@@ -58,13 +48,26 @@ func main() {
 	proxy := &httputil.ReverseProxy {
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
-			r.Out.Header.Set("Authorization", "Basic " + creds)
+			r.Out.SetBasicAuth(user, pass)
 		},
 		Transport: customTransport,
 		ErrorHandler: handleUpstreamError,
 		ModifyResponse: logResponse,
 	}
 
+	return proxy
+}
+
+
+func main() {
+	pcloudUser := "username"
+	pcloudPass := "password"
+	proxyUser := "testuser"
+	proxyPass := "testpass"
+
+	target, _ := url.Parse("https://127.0.0.1:8099")
+	
+	proxy := NewReverseProxy(pcloudUser, pcloudPass, target)
 	handler := requireAuth(proxyUser, proxyPass, proxy)
 	http.Handle("/", handler)
 	
