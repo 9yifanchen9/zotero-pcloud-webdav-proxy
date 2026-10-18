@@ -60,6 +60,18 @@ func TestAuthHandler(t *testing.T) {
 		assertUnauthorised(t, response.Result())
 	})
 
+	for _, nearMiss := range []string{"testpas", "testpass1", ""} {
+		t.Run("fail authentication for near-miss password "+nearMiss, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/zotero", nil)
+			request.SetBasicAuth(user, nearMiss)
+			response := httptest.NewRecorder()
+
+			handler.ServeHTTP(response, request)
+
+			assertUnauthorised(t, response.Result())
+		})
+	}
+
 	t.Run("successful proxy with pcloud credentials for correct credentials", func(t *testing.T) {
 		request := httptest.NewRequest(http.MethodGet, "/zotero", nil)
 		request.SetBasicAuth(user, pass)

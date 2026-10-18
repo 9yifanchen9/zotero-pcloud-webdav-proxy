@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"log"
 	"net/http"
@@ -8,10 +9,17 @@ import (
 
 // Handler on authentication from Zotero WebDAV
 func requireAuth(user, pass string, next http.Handler) http.Handler {
+	// ConstantTimeCompare returns early when lengths differ, so compare fixed-length
+	// digests instead of the raw values to avoid leaking the credential lengths
+	wantUser := sha256.Sum256([]byte(user))
+	wantPass := sha256.Sum256([]byte(pass))
+
 	authHandlerFunc := func(w http.ResponseWriter, r *http.Request) {
 		u, p, ok := r.BasicAuth()
-		userIsValid := subtle.ConstantTimeCompare([]byte(u), []byte(user)) == 1
-		passIsValid := subtle.ConstantTimeCompare([]byte(p), []byte(pass)) == 1
+		gotUser := sha256.Sum256([]byte(u))
+		gotPass := sha256.Sum256([]byte(p))
+		userIsValid := subtle.ConstantTimeCompare(gotUser[:], wantUser[:]) == 1
+		passIsValid := subtle.ConstantTimeCompare(gotPass[:], wantPass[:]) == 1
 
 		if !ok || !userIsValid || !passIsValid {
 			w.Header().Set("WWW-Authenticate", `Basic realm="zotero-webdav"`)
