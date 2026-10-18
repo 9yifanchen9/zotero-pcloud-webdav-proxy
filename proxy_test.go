@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
+	"crypto/rand"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -209,6 +212,80 @@ func TestMultistatusRewrite(t *testing.T) {
 
 		if response.Code != http.StatusBadGateway {
 			t.Errorf("expected 502, got %d", response.Code)
+		}
+	})
+}
+
+func TestUpstreamUnreachable(t *testing.T) {
+	// Reserve a port, then close it so nothing is listening there
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadURL, _ := url.Parse("http://" + ln.Addr().String())
+	ln.Close()
+
+	captureLogs(t)
+	proxy := NewReverseProxy("pclouduser", "pcloudpass", deadURL, "/Zotero")
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/zotero/ABCD1234.zip", nil))
+
+	if response.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", response.Code)
+	}
+}
+
+func TestBodiesPassThrough(t *testing.T) {
+	type received struct {
+		method string
+		body   []byte
+	}
+	var got received
+	download := make([]byte, 4<<20)
+	rand.Read(download)
+	proxy := newTestProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got = received{r.Method, body}
+		if r.Method == http.MethodGet {
+			w.Write(download)
+		}
+	})
+
+	upload := make([]byte, 4<<20)
+	rand.Read(upload)
+	propfind := []byte(`<?xml version="1.0"?><propfind xmlns="DAV:"><prop><getlastmodified/></prop></propfind>`)
+
+	for _, tc := range []struct {
+		method string
+		body   []byte
+	}{
+		{http.MethodPut, upload},
+		{"PROPFIND", propfind},
+		{"MKCOL", nil},
+		{http.MethodDelete, nil},
+		{http.MethodOptions, nil},
+	} {
+		t.Run(tc.method+" request body reaches upstream intact", func(t *testing.T) {
+			got = received{}
+			response := httptest.NewRecorder()
+
+			proxy.ServeHTTP(response, httptest.NewRequest(tc.method, "/zotero/ABCD1234.zip", bytes.NewReader(tc.body)))
+
+			if response.Code != http.StatusOK || got.method != tc.method || !bytes.Equal(got.body, tc.body) {
+				t.Errorf("expected 200 with %s and a %d byte body upstream, got %d with %s and %d bytes",
+					tc.method, len(tc.body), response.Code, got.method, len(got.body))
+			}
+		})
+	}
+
+	t.Run("GET response body reaches Zotero intact", func(t *testing.T) {
+		response := httptest.NewRecorder()
+
+		proxy.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/zotero/ABCD1234.zip", nil))
+
+		if response.Code != http.StatusOK || !bytes.Equal(response.Body.Bytes(), download) {
+			t.Errorf("expected 200 with the %d byte download, got %d with %d bytes", len(download), response.Code, response.Body.Len())
 		}
 	})
 }
