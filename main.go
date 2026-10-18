@@ -60,7 +60,7 @@ func main() {
 	}
 
 	proxy := NewReverseProxy(cfg.pcloudUser, cfg.pcloudPass, cfg.pcloudURL)
-	handler := requireAuth(cfg.proxyUser, cfg.proxyPass, proxy)
+	handler := withRequestID(requireAuth(cfg.proxyUser, cfg.proxyPass, proxy))
 	http.Handle("/", handler)
 
 	ln, err := net.Listen("tcp", ":8080")

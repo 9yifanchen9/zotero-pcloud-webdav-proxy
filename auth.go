@@ -3,7 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"crypto/subtle"
-	"log"
 	"net/http"
 )
 
@@ -23,7 +22,7 @@ func requireAuth(user, pass string, next http.Handler) http.Handler {
 
 		if !ok || !userIsValid || !passIsValid {
 			w.Header().Set("WWW-Authenticate", `Basic realm="zotero-webdav"`)
-			log.Printf("method=%s path=%s status=unauthorised-from-zotero", r.Method, r.URL.Path)
+			logRequest(r, "status=unauthorised-from-zotero")
 			http.Error(w, "Unauthorised", http.StatusUnauthorized)
 			return
 		}

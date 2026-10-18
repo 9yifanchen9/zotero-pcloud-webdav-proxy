@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -9,12 +9,12 @@ import (
 )
 
 func handleUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
-	log.Printf("upstream error: method=%s path=%s err=%v", r.Method, r.URL.Path, err)
+	logRequest(r, fmt.Sprintf("status=upstream-error err=%q", err))
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
 
 func logResponse(resp *http.Response) error {
-	log.Printf("method=%s path=%s status=%d", resp.Request.Method, resp.Request.URL.Path, resp.StatusCode)
+	logRequest(resp.Request, fmt.Sprintf("status=%d", resp.StatusCode))
 	return nil
 }
 
