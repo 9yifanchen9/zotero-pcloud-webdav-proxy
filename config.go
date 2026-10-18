@@ -1,9 +1,18 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
+
+// pCloud WebDAV endpoints by account region. An account only works against the
+// endpoint for the region it was created in.
+var pcloudRegionURLs = map[string]string{
+	"us": "https://webdav.pcloud.com",
+	"eu": "https://ewebdav.pcloud.com",
+}
 
 type config struct {
 	pcloudURL  *url.URL
@@ -17,7 +26,7 @@ type config struct {
 func loadConfig(getenv func(string) string) (*config, error) {
 	values := map[string]string{}
 	var missing []string
-	for _, key := range []string{"PCLOUD_URL", "PCLOUD_USER", "PCLOUD_PASS", "PROXY_USER", "PROXY_PASS"} {
+	for _, key := range []string{"PCLOUD_USER", "PCLOUD_PASS", "PROXY_USER", "PROXY_PASS"} {
 		values[key] = getenv(key)
 		if values[key] == "" {
 			missing = append(missing, key)
@@ -27,12 +36,9 @@ func loadConfig(getenv func(string) string) (*config, error) {
 		return nil, fmt.Errorf("missing required environment variables: %v", missing)
 	}
 
-	target, err := url.Parse(values["PCLOUD_URL"])
+	target, err := upstreamURL(getenv("PCLOUD_REGION"), getenv("PCLOUD_URL"))
 	if err != nil {
-		return nil, fmt.Errorf("invalid PCLOUD_URL: %w", err)
-	}
-	if target.Scheme != "http" && target.Scheme != "https" || target.Host == "" {
-		return nil, fmt.Errorf("invalid PCLOUD_URL %q: must be an absolute http(s) URL", values["PCLOUD_URL"])
+		return nil, err
 	}
 
 	return &config{
@@ -42,4 +48,30 @@ func loadConfig(getenv func(string) string) (*config, error) {
 		proxyUser:  values["PROXY_USER"],
 		proxyPass:  values["PROXY_PASS"],
 	}, nil
+}
+
+// Picks the upstream from PCLOUD_REGION, or from PCLOUD_URL when pointing at another
+// WebDAV server such as a local test server. Exactly one of the two must be set.
+func upstreamURL(region, rawURL string) (*url.URL, error) {
+	switch {
+	case region != "" && rawURL != "":
+		return nil, errors.New("set only one of PCLOUD_REGION and PCLOUD_URL")
+	case region != "":
+		regionURL, ok := pcloudRegionURLs[strings.ToLower(region)]
+		if !ok {
+			return nil, fmt.Errorf("invalid PCLOUD_REGION %q: must be us or eu", region)
+		}
+		return url.Parse(regionURL)
+	case rawURL != "":
+		target, err := url.Parse(rawURL)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PCLOUD_URL: %w", err)
+		}
+		if target.Scheme != "http" && target.Scheme != "https" || target.Host == "" {
+			return nil, fmt.Errorf("invalid PCLOUD_URL %q: must be an absolute http(s) URL", rawURL)
+		}
+		return target, nil
+	default:
+		return nil, errors.New("missing required environment variable: set PCLOUD_REGION (us or eu)")
+	}
 }

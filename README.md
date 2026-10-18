@@ -3,11 +3,12 @@ WebDAV proxy sitting between Zotero and pCloud
 
 ## Configuration
 
-All settings are read from environment variables; the proxy refuses to start if any are missing.
+All settings are read from environment variables; the proxy refuses to start if any required one is missing.
 
 | Variable      | Description                                                                      |
 |---------------|----------------------------------------------------------------------------------|
-| `PCLOUD_URL`  | pCloud WebDAV endpoint, e.g. `https://webdav.pcloud.com` (US) or `https://ewebdav.pcloud.com` (EU) |
+| `PCLOUD_REGION` | Region your pCloud account was created in: `us` (`webdav.pcloud.com`) or `eu` (`ewebdav.pcloud.com`) |
+| `PCLOUD_URL`  | Optional. Full upstream URL to use instead of `PCLOUD_REGION`, e.g. a local WebDAV server for testing. Set only one of the two. |
 | `PCLOUD_USER` | pCloud account username                                                          |
 | `PCLOUD_PASS` | pCloud account password                                                          |
 | `PROXY_USER`  | Username Zotero uses to authenticate to this proxy                               |
