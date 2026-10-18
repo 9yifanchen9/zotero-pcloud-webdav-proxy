@@ -1,11 +1,19 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 )
+
+// How long in-flight requests, such as large uploads, get to finish after a shutdown signal
+const shutdownTimeout = 30 * time.Second
 
 // Builds the listening server. There is deliberately no ReadTimeout or WriteTimeout:
 // they bound the whole request/response including the body, which would cut off large
@@ -21,6 +29,30 @@ func newServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// Serves until ctx is cancelled, then stops accepting connections and waits for
+// in-flight requests to finish
+func run(ctx context.Context, srv *http.Server, ln net.Listener) error {
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.Serve(ln) }()
+
+	select {
+	case err := <-serveErr:
+		return err
+	case <-ctx.Done():
+	}
+
+	log.Println("Shutting down")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		return err
+	}
+	if err := <-serveErr; !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
 func main() {
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
@@ -31,11 +63,17 @@ func main() {
 	handler := requireAuth(cfg.proxyUser, cfg.proxyPass, proxy)
 	http.Handle("/", handler)
 
-	log.Println("Begin listening")
-
-	err = newServer(":8080", nil).ListenAndServe()
+	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	log.Println("Begin listening")
+
+	if err := run(ctx, newServer("", nil), ln); err != nil {
+		log.Fatal(err)
+	}
 }
