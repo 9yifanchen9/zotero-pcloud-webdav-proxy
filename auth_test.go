@@ -16,7 +16,7 @@ func TestAuthHandler(t *testing.T) {
 	}))
 	server.Start()
 	serverURL, _ := url.Parse(server.URL)
-	proxy := NewReverseProxy(pcloudUser, pcloudPass, serverURL)
+	proxy := NewReverseProxy(pcloudUser, pcloudPass, serverURL, "/Zotero")
 
 	user, pass := "testuser", "testpass"
 	handler := requireAuth(user, pass, proxy)

@@ -59,9 +59,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	proxy := NewReverseProxy(cfg.pcloudUser, cfg.pcloudPass, cfg.pcloudURL)
+	proxy := NewReverseProxy(cfg.pcloudUser, cfg.pcloudPass, cfg.pcloudURL, cfg.pcloudRoot)
 	handler := withRequestID(requireAuth(cfg.proxyUser, cfg.proxyPass, proxy))
-	http.Handle("/", handler)
 
 	ln, err := net.Listen("tcp", ":8080")
 	if err != nil {
@@ -73,7 +72,7 @@ func main() {
 
 	log.Println("Begin listening")
 
-	if err := run(ctx, newServer("", nil), ln); err != nil {
+	if err := run(ctx, newServer("", handler), ln); err != nil {
 		log.Fatal(err)
 	}
 }

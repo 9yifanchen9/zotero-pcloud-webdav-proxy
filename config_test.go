@@ -10,6 +10,7 @@ func TestLoadConfig(t *testing.T) {
 		"PCLOUD_REGION": "us",
 		"PCLOUD_USER":   "pclouduser",
 		"PCLOUD_PASS":   "pcloudpass",
+		"PCLOUD_ROOT":   "/Zotero",
 		"PROXY_USER":    "testuser",
 		"PROXY_PASS":    "testpass",
 	}
@@ -83,7 +84,28 @@ func TestLoadConfig(t *testing.T) {
 		}
 	})
 
-	for _, badURL := range []string{"webdav.pcloud.com", "ftp://webdav.pcloud.com", "https://", "://bad"} {
+	for raw, want := range map[string]string{"/Zotero": "/Zotero", "Zotero": "/Zotero", "/Apps/Zotero/": "/Apps/Zotero", "/a/../Zotero": "/Zotero"} {
+		t.Run("normalises PCLOUD_ROOT "+raw, func(t *testing.T) {
+			cfg, err := loadConfig(envWith(map[string]string{"PCLOUD_ROOT": raw}))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.pcloudRoot != want {
+				t.Errorf("expected root %q, got %q", want, cfg.pcloudRoot)
+			}
+		})
+	}
+
+	for _, root := range []string{"/", "//", "/..", "."} {
+		t.Run("fails for PCLOUD_ROOT at the drive root "+root, func(t *testing.T) {
+			_, err := loadConfig(envWith(map[string]string{"PCLOUD_ROOT": root}))
+			if err == nil || !strings.Contains(err.Error(), "PCLOUD_ROOT") {
+				t.Errorf("expected PCLOUD_ROOT error, got %v", err)
+			}
+		})
+	}
+
+	for _, badURL := range []string{"webdav.pcloud.com", "ftp://webdav.pcloud.com", "https://", "://bad", "https://webdav.pcloud.com/Zotero", "https://webdav.pcloud.com/?a=b", "https://u:p@webdav.pcloud.com"} {
 		t.Run("fails for invalid PCLOUD_URL "+badURL, func(t *testing.T) {
 			_, err := loadConfig(envWith(map[string]string{"PCLOUD_REGION": "", "PCLOUD_URL": badURL}))
 			if err == nil {

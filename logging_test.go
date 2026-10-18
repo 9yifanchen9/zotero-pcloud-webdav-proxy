@@ -26,7 +26,7 @@ func TestRequestLogging(t *testing.T) {
 
 	pcloudUser, pcloudPass := "pclouduser", "pcloud-secret"
 	user, pass := "testuser", "proxy-secret"
-	handler := withRequestID(requireAuth(user, pass, NewReverseProxy(pcloudUser, pcloudPass, serverURL)))
+	handler := withRequestID(requireAuth(user, pass, NewReverseProxy(pcloudUser, pcloudPass, serverURL, "/Zotero")))
 
 	t.Run("logs the request ID for proxied requests without credentials", func(t *testing.T) {
 		logs := captureLogs(t)
