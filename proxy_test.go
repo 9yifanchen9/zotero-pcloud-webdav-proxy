@@ -1,9 +1,13 @@
 package main
 
 import (
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -70,4 +74,141 @@ func TestPathScoping(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDestinationRewrite(t *testing.T) {
+	var upstreamDestination string
+	var upstreamHit bool
+	var upstreamHost string
+	proxy := newTestProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		upstreamHit = true
+		upstreamHost = r.Host
+		upstreamDestination = r.Header.Get("Destination")
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	move := func(destination string) *httptest.ResponseRecorder {
+		upstreamHit, upstreamDestination = false, ""
+		request := httptest.NewRequest("MOVE", "http://proxy.local/zotero/old.zip", nil)
+		request.Header.Set("Destination", destination)
+		response := httptest.NewRecorder()
+		proxy.ServeHTTP(response, request)
+		return response
+	}
+
+	for _, destination := range []string{"http://proxy.local/zotero/new%20name.zip", "/zotero/new%20name.zip"} {
+		t.Run("rewrites destination "+destination+" into the root folder", func(t *testing.T) {
+			response := move(destination)
+
+			want := "http://" + upstreamHost + "/Zotero/zotero/new%20name.zip"
+			if response.Code != http.StatusCreated || upstreamDestination != want {
+				t.Errorf("expected 201 with Destination %q, got %d with %q", want, response.Code, upstreamDestination)
+			}
+		})
+	}
+
+	t.Run("rejects a destination that escapes the root folder", func(t *testing.T) {
+		response := move("http://proxy.local/zotero/../../secret")
+
+		if response.Code != http.StatusBadRequest || upstreamHit {
+			t.Errorf("expected 400 without reaching upstream, got %d (upstream hit=%v)", response.Code, upstreamHit)
+		}
+	})
+
+	t.Run("rejects a destination on another server", func(t *testing.T) {
+		response := move("http://elsewhere.example/zotero/new.zip")
+
+		if response.Code != http.StatusBadGateway || upstreamHit {
+			t.Errorf("expected 502 without reaching upstream, got %d (upstream hit=%v)", response.Code, upstreamHit)
+		}
+	})
+}
+
+func TestLocationRewrite(t *testing.T) {
+	proxy := newTestProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "http://"+r.Host+"/Zotero/zotero/ABCD1234.zip")
+		w.WriteHeader(http.StatusCreated)
+	})
+	response := httptest.NewRecorder()
+
+	proxy.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/zotero/ABCD1234.zip", strings.NewReader("data")))
+
+	if got := response.Header().Get("Location"); got != "/zotero/ABCD1234.zip" {
+		t.Errorf("expected Location /zotero/ABCD1234.zip, got %q", got)
+	}
+}
+
+func TestMultistatusRewrite(t *testing.T) {
+	const multistatus = `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response><D:href>http://HOST/Zotero/zotero/</D:href></D:response>
+  <D:response><D:href>/Zotero/zotero/ABCD1234.zip</D:href></D:response>
+  <D:response><D:href> /Zotero/zotero/a%20b&amp;c.prop </D:href></D:response>
+  <response xmlns="DAV:"><href>/%5Aotero/zotero/escaped-root.prop</href></response>
+  <D:response><D:href>/Other/secret.txt</D:href></D:response>
+</D:multistatus>`
+	const want = `<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+  <D:response><D:href>/zotero/</D:href></D:response>
+  <D:response><D:href>/zotero/ABCD1234.zip</D:href></D:response>
+  <D:response><D:href>/zotero/a%20b&amp;c.prop</D:href></D:response>
+  <response xmlns="DAV:"><href>/zotero/escaped-root.prop</href></response>
+  <D:response><D:href>/Other/secret.txt</D:href></D:response>
+</D:multistatus>`
+
+	for _, compress := range []bool{false, true} {
+		name := "rewrites hrefs into proxy paths"
+		if compress {
+			name += " from a gzip response"
+		}
+		t.Run(name, func(t *testing.T) {
+			proxy := newTestProxy(t, func(w http.ResponseWriter, r *http.Request) {
+				body := strings.ReplaceAll(multistatus, "HOST", r.Host)
+				w.Header().Set("Content-Type", `application/xml; charset="utf-8"`)
+				if compress && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+					w.Header().Set("Content-Encoding", "gzip")
+					w.WriteHeader(http.StatusMultiStatus)
+					gz := gzip.NewWriter(w)
+					io.WriteString(gz, body)
+					gz.Close()
+					return
+				}
+				w.WriteHeader(http.StatusMultiStatus)
+				io.WriteString(w, body)
+			})
+			request := httptest.NewRequest("PROPFIND", "/zotero/", nil)
+			request.Header.Set("Depth", "1")
+			// Zotero's HTTP stack asks for compressed responses
+			request.Header.Set("Accept-Encoding", "gzip, deflate, br")
+			response := httptest.NewRecorder()
+
+			proxy.ServeHTTP(response, request)
+
+			got := response.Body.String()
+			if response.Code != http.StatusMultiStatus || got != want {
+				t.Errorf("expected 207 with\n%s\ngot %d with\n%s", want, response.Code, got)
+			}
+			if response.Header().Get("Content-Encoding") != "" {
+				t.Errorf("expected decoded body, got Content-Encoding %q", response.Header().Get("Content-Encoding"))
+			}
+			if cl := response.Header().Get("Content-Length"); cl != strconv.Itoa(len(want)) {
+				t.Errorf("expected Content-Length %d, got %q", len(want), cl)
+			}
+		})
+	}
+
+	t.Run("fails with 502 rather than pass on an unrewritable body", func(t *testing.T) {
+		proxy := newTestProxy(t, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Encoding", "br")
+			w.WriteHeader(http.StatusMultiStatus)
+			io.WriteString(w, "not really brotli")
+		})
+		response := httptest.NewRecorder()
+
+		proxy.ServeHTTP(response, httptest.NewRequest("PROPFIND", "/zotero/", nil))
+
+		if response.Code != http.StatusBadGateway {
+			t.Errorf("expected 502, got %d", response.Code)
+		}
+	})
 }
