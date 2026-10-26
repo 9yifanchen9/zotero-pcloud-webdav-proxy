@@ -289,3 +289,20 @@ func TestBodiesPassThrough(t *testing.T) {
 		}
 	})
 }
+
+func TestUpstreamTransport(t *testing.T) {
+	transport := newUpstreamTransport()
+
+	t.Run("honours proxy environment variables", func(t *testing.T) {
+		if transport.Proxy == nil {
+			t.Error("expected a Proxy function such as http.ProxyFromEnvironment")
+		}
+	})
+
+	t.Run("bounds dialling, the TLS handshake and waiting for headers", func(t *testing.T) {
+		if transport.DialContext == nil || transport.TLSHandshakeTimeout == 0 || transport.ResponseHeaderTimeout == 0 {
+			t.Errorf("expected dial, TLS handshake and response header timeouts, got DialContext=%v TLSHandshakeTimeout=%v ResponseHeaderTimeout=%v",
+				transport.DialContext != nil, transport.TLSHandshakeTimeout, transport.ResponseHeaderTimeout)
+		}
+	})
+}
