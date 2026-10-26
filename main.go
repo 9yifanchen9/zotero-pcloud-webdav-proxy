@@ -29,6 +29,11 @@ func newServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+// Wraps the proxy in the handler chain. Health checks sit before authentication.
+func newHandler(proxyUser, proxyPass string, proxy http.Handler) http.Handler {
+	return withRequestID(withHealthCheck(requireAuth(proxyUser, proxyPass, proxy)))
+}
+
 // Serves until ctx is cancelled, then stops accepting connections and waits for
 // in-flight requests to finish
 func run(ctx context.Context, srv *http.Server, ln net.Listener) error {
@@ -60,7 +65,7 @@ func main() {
 	}
 
 	proxy := NewReverseProxy(cfg.pcloudUser, cfg.pcloudPass, cfg.pcloudURL, cfg.pcloudRoot)
-	handler := withRequestID(requireAuth(cfg.proxyUser, cfg.proxyPass, proxy))
+	handler := newHandler(cfg.proxyUser, cfg.proxyPass, proxy)
 
 	ln, err := net.Listen("tcp", cfg.listenAddr)
 	if err != nil {
