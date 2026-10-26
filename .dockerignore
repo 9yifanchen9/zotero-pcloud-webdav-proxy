@@ -1,0 +1,5 @@
+# Allow-list, so .env and anything else not needed for the build stays out of the context
+*
+!go.mod
+!*.go
+*_test.go
