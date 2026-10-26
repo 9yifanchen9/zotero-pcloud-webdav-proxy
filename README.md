@@ -38,8 +38,7 @@ All settings are read from environment variables; the proxy refuses to start if 
 | `PCLOUD_PASS` | pCloud account password |
 | `PROXY_USER` | Username Zotero uses to authenticate to this proxy |
 | `PROXY_PASS` | Password Zotero uses to authenticate to this proxy |
-
-The proxy listens on port `8080`.
+| `LISTEN_ADDR` | Optional. Address to listen on, as `host:port`. Defaults to `127.0.0.1:8080`, reachable only from the same machine. Use `0.0.0.0:8080` to listen on all interfaces, e.g. in a container. |
 
 ## Running
 
@@ -72,7 +71,7 @@ Click **Verify Server** to check the setup.
 
 ## Security notes
 
-The proxy speaks plain HTTP on all interfaces, and Basic Auth sends the proxy password with every request. Either run it on the same machine as Zotero and reach it over `127.0.0.1`, or put it behind a TLS-terminating reverse proxy. Don't expose port 8080 directly to a network you don't trust.
+The proxy speaks plain HTTP, and Basic Auth sends the proxy password with every request. By default it only listens on `127.0.0.1`, so run it on the same machine as Zotero, or put it behind a TLS-terminating reverse proxy such as Caddy. Don't set `LISTEN_ADDR` to an address reachable from a network you don't trust.
 
 ## Development
 

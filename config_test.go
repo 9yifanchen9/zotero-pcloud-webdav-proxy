@@ -113,4 +113,35 @@ func TestLoadConfig(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("listens on loopback when LISTEN_ADDR is unset", func(t *testing.T) {
+		cfg, err := loadConfig(envWith(nil))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.listenAddr != "127.0.0.1:8080" {
+			t.Errorf("expected 127.0.0.1:8080, got %q", cfg.listenAddr)
+		}
+	})
+
+	for _, addr := range []string{"0.0.0.0:8080", ":8080", "[::1]:9000", "localhost:0"} {
+		t.Run("accepts LISTEN_ADDR "+addr, func(t *testing.T) {
+			cfg, err := loadConfig(envWith(map[string]string{"LISTEN_ADDR": addr}))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if cfg.listenAddr != addr {
+				t.Errorf("expected %q, got %q", addr, cfg.listenAddr)
+			}
+		})
+	}
+
+	for _, addr := range []string{"8080", "0.0.0.0", "0.0.0.0:", "0.0.0.0:http", "0.0.0.0:65536", "::1:8080"} {
+		t.Run("fails for invalid LISTEN_ADDR "+addr, func(t *testing.T) {
+			_, err := loadConfig(envWith(map[string]string{"LISTEN_ADDR": addr}))
+			if err == nil || !strings.Contains(err.Error(), "LISTEN_ADDR") {
+				t.Errorf("expected LISTEN_ADDR error, got %v", err)
+			}
+		})
+	}
 }

@@ -62,7 +62,7 @@ func main() {
 	proxy := NewReverseProxy(cfg.pcloudUser, cfg.pcloudPass, cfg.pcloudURL, cfg.pcloudRoot)
 	handler := withRequestID(requireAuth(cfg.proxyUser, cfg.proxyPass, proxy))
 
-	ln, err := net.Listen("tcp", ":8080")
+	ln, err := net.Listen("tcp", cfg.listenAddr)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Println("Begin listening")
+	log.Printf("Begin listening on %s", ln.Addr())
 
 	if err := run(ctx, newServer("", handler), ln); err != nil {
 		log.Fatal(err)

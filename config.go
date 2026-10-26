@@ -3,10 +3,15 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 )
+
+// Loopback by default, so the proxy is not reachable from the network unless asked
+const defaultListenAddr = "127.0.0.1:8080"
 
 // pCloud WebDAV endpoints by account region. An account only works against the
 // endpoint for the region it was created in.
@@ -16,6 +21,7 @@ var pcloudRegionURLs = map[string]string{
 }
 
 type config struct {
+	listenAddr string
 	pcloudURL  *url.URL
 	pcloudRoot string
 	pcloudUser string
@@ -38,6 +44,11 @@ func loadConfig(getenv func(string) string) (*config, error) {
 		return nil, fmt.Errorf("missing required environment variables: %v", missing)
 	}
 
+	listenAddr, err := parseListenAddr(getenv("LISTEN_ADDR"))
+	if err != nil {
+		return nil, err
+	}
+
 	target, err := upstreamURL(getenv("PCLOUD_REGION"), getenv("PCLOUD_URL"))
 	if err != nil {
 		return nil, err
@@ -50,6 +61,7 @@ func loadConfig(getenv func(string) string) (*config, error) {
 	}
 
 	return &config{
+		listenAddr: listenAddr,
 		pcloudURL:  target,
 		pcloudRoot: root,
 		pcloudUser: values["PCLOUD_USER"],
@@ -87,4 +99,20 @@ func upstreamURL(region, rawURL string) (*url.URL, error) {
 	default:
 		return nil, errors.New("missing required environment variable: set PCLOUD_REGION (us or eu)")
 	}
+}
+
+// Checks LISTEN_ADDR is a host:port pair, falling back to the loopback default when
+// unset. An empty host, as in ":8080", listens on all interfaces.
+func parseListenAddr(raw string) (string, error) {
+	if raw == "" {
+		return defaultListenAddr, nil
+	}
+	_, port, err := net.SplitHostPort(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid LISTEN_ADDR %q: must be host:port, e.g. 0.0.0.0:8080", raw)
+	}
+	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
+		return "", fmt.Errorf("invalid LISTEN_ADDR %q: port must be a number from 0 to 65535", raw)
+	}
+	return raw, nil
 }
