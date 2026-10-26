@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -79,6 +82,71 @@ func TestHealthEndpoint(t *testing.T) {
 
 			if response.Code != http.StatusOK || upstreamHits != 1 {
 				t.Errorf("expected 200 from the upstream, got %d with %d upstream hits", response.Code, upstreamHits)
+			}
+		})
+	}
+}
+
+func TestCheckHealth(t *testing.T) {
+	// Serves the given handler on a loopback port and returns its address
+	serve := func(t *testing.T, handler http.Handler) string {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := newServer("", handler)
+		go srv.Serve(ln)
+		t.Cleanup(func() { srv.Close() })
+		return ln.Addr().String()
+	}
+
+	t.Run("succeeds against a running proxy", func(t *testing.T) {
+		addr := serve(t, newHandler("testuser", "testpass", http.NotFoundHandler()))
+		if err := checkHealth(context.Background(), addr); err != nil {
+			t.Errorf("expected healthy, got %v", err)
+		}
+	})
+
+	t.Run("reaches a proxy listening on all interfaces over loopback", func(t *testing.T) {
+		addr := serve(t, newHandler("testuser", "testpass", http.NotFoundHandler()))
+		_, port, _ := net.SplitHostPort(addr)
+		if err := checkHealth(context.Background(), "0.0.0.0:"+port); err != nil {
+			t.Errorf("expected healthy, got %v", err)
+		}
+	})
+
+	t.Run("fails when /healthz does not return 200", func(t *testing.T) {
+		addr := serve(t, http.NotFoundHandler())
+		if err := checkHealth(context.Background(), addr); err == nil || !strings.Contains(err.Error(), "404") {
+			t.Errorf("expected a 404 error, got %v", err)
+		}
+	})
+
+	t.Run("fails when nothing is listening", func(t *testing.T) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		addr := ln.Addr().String()
+		ln.Close()
+		if err := checkHealth(context.Background(), addr); err == nil {
+			t.Error("expected an error with nothing listening")
+		}
+	})
+
+	for listenAddr, want := range map[string]string{
+		":8080":          "127.0.0.1:8080",
+		"0.0.0.0:8080":   "127.0.0.1:8080",
+		"[::]:8080":      "[::1]:8080",
+		"127.0.0.1:8080": "127.0.0.1:8080",
+		"10.0.0.5:8080":  "10.0.0.5:8080",
+		"localhost:8080": "localhost:8080",
+		"[fe80::1]:8080": "[fe80::1]:8080",
+	} {
+		t.Run("dials "+want+" for LISTEN_ADDR "+listenAddr, func(t *testing.T) {
+			if got := healthCheckAddr(listenAddr); got != want {
+				t.Errorf("expected %q, got %q", want, got)
 			}
 		})
 	}
