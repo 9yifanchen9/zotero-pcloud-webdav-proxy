@@ -18,13 +18,15 @@ The module needs Go 1.27 or later (`go.mod`); the toolchain downloads it automat
 
 | File | Responsibility |
 | --- | --- |
-| `main.go` | Server construction, timeouts, graceful shutdown, wiring |
+| `main.go` | Server construction, timeouts, graceful shutdown, wiring, `healthcheck` subcommand |
 | `config.go` | Environment variables → `config`, with validation |
+| `health.go` | `/healthz` handler and the client the `healthcheck` subcommand uses |
 | `auth.go` | Basic Auth check of Zotero's proxy credentials |
 | `proxy.go` | Reverse proxy: path validation, root scoping, URL rewriting |
 | `logging.go` | Request IDs and the single `logRequest` helper |
+| `Dockerfile`, `compose.yaml` | Container image and an example deployment |
 
-Handler chain: `withRequestID` → `requireAuth` → `webdavProxy` → pCloud.
+Handler chain (`newHandler`): `withRequestID` → `withHealthCheck` → `requireAuth` → `webdavProxy` → pCloud.
 
 ## Conventions
 
@@ -46,13 +48,17 @@ Don't undo these without discussing it first:
 - **URL rewriting is two-way.** `Destination` goes proxy → pCloud; `Location` and multistatus `href`s go pCloud → proxy, by stripping the root prefix. Zotero checks that PROPFIND hrefs sit under the URL it requested. The client's `Accept-Encoding` is dropped for everything except GET/HEAD so the transport decodes gzip and bodies can be rewritten.
 - **Credentials are compared as SHA-256 digests in constant time**, so timing doesn't leak their length.
 - **`PCLOUD_REGION` (`us`/`eu`) chooses the endpoint.** `PCLOUD_URL` is only an override for test servers, holds only a scheme and host, and can't be combined with `PCLOUD_REGION`.
+- **The upstream transport is cloned from `http.DefaultTransport`** for its dial/TLS timeouts and `HTTPS_PROXY` support; don't go back to a bare `http.Transport`.
+- **`LISTEN_ADDR` defaults to `127.0.0.1:8080`.** The image overrides it to `0.0.0.0:8080`. TLS belongs in a reverse proxy such as Caddy, not in this binary.
+- **`/healthz` is answered before authentication and never reaches pCloud**, so a pCloud outage doesn't get a working container restarted. It's matched exactly, not through `http.ServeMux`, and isn't logged.
+- **The image is distroless `static:nonroot`, with base images pinned by digest.** It has no shell or curl, so `HEALTHCHECK` runs the binary's own `healthcheck` subcommand. `.dockerignore` is an allow-list so `.env` can't enter the build context.
+- **Stop timeouts exceed the 30s shutdown window** (`stop_grace_period: 40s`); Docker's 10s default would cut off uploads.
+- **Configuration in containers comes from an env file** (`.env`, gitignored), not Docker secrets.
 
 ## Known gaps / backlog
 
 Parked deliberately, roughly in priority order:
 
-1. **Upstream transport:** `proxy.go` builds a bare `http.Transport`, so it has no dial or TLS-handshake timeout and no `HTTPS_PROXY` support. Fix it by starting from `http.DefaultTransport.(*http.Transport).Clone()`. Check whether the 30s `ResponseHeaderTimeout` is enough for a large `PROPFIND Depth: 1`.
-2. **`LISTEN_ADDR`:** the listen address is hardcoded to `:8080`, i.e. all interfaces. Make it configurable and default to `127.0.0.1:8080`. Containers need `0.0.0.0`. TLS is expected to be handled by a reverse proxy such as Caddy, not built in.
-3. **Dockerisation:** multi-stage build producing a static binary (`CGO_ENABLED=0`) on a distroless or scratch base, running as non-root. The container's stop timeout must exceed the proxy's 30s shutdown window. Add `/healthz` at the same time.
-4. **Method allow-list:** optionally restrict to the methods Zotero uses (OPTIONS, PROPFIND, GET, PUT, DELETE, MKCOL).
-5. **Not yet verified against real pCloud and Zotero:** run "Verify Server", a sync, and orphaned-file cleanup, and confirm the href rewriting with real responses.
+1. **Method allow-list:** optionally restrict to the methods Zotero uses (OPTIONS, PROPFIND, GET, PUT, DELETE, MKCOL).
+2. **Not yet verified against real pCloud and Zotero:** run "Verify Server", a sync, and orphaned-file cleanup, and confirm the href rewriting with real responses. Also check whether the 30s `ResponseHeaderTimeout` is enough for a large `PROPFIND Depth: 1`.
+3. **Image publishing:** a GitHub Actions workflow to build multi-arch images and push them to GHCR, with Dependabot bumping the pinned base image digests. Held off for now; images are built locally from `compose.yaml`.

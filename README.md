@@ -61,6 +61,28 @@ Create the `PCLOUD_ROOT` folder in pCloud first. Zotero can create the `zotero` 
 
 On `SIGINT` or `SIGTERM` the proxy stops accepting connections and gives in-flight transfers up to 30 seconds to finish.
 
+## Running with Docker
+
+The image is a static binary on a distroless base, running as a non-root user. It listens on `0.0.0.0:8080` inside the container and reports its health through `/healthz`.
+
+With Docker Compose:
+
+```sh
+cp .env.example .env   # then fill in your values
+docker compose up -d --build
+```
+
+`compose.yaml` publishes the port on `127.0.0.1` only, runs the container read-only with no capabilities, and gives it 40 seconds to stop.
+
+With plain Docker:
+
+```sh
+docker build -t zotero-pcloud-webdav-proxy .
+docker run -d --env-file .env -p 127.0.0.1:8080:8080 --stop-timeout 40 zotero-pcloud-webdav-proxy
+```
+
+Docker only waits 10 seconds after `SIGTERM` by default, so keep `--stop-timeout` (or `stop_grace_period` in Compose) above the proxy's 30-second shutdown window, or in-flight uploads are cut off. Publish the port on `127.0.0.1`: a bare `-p 8080:8080` exposes it on every interface of the host.
+
 ## Configuring Zotero
 
 In Zotero, open **Settings → Sync → File Syncing** and choose **WebDAV**:

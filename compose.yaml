@@ -1,0 +1,17 @@
+services:
+  proxy:
+    build: .
+    image: zotero-pcloud-webdav-proxy
+    # Copy .env.example to .env and fill it in; .env is gitignored
+    env_file: .env
+    # Reachable from this machine only. Put a TLS-terminating reverse proxy in front
+    # to reach it from elsewhere, rather than publishing on all interfaces.
+    ports:
+      - "127.0.0.1:8080:8080"
+    # Longer than the proxy's 30s shutdown window, so in-flight transfers can finish
+    stop_grace_period: 40s
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
