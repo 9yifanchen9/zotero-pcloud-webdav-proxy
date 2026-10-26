@@ -23,6 +23,7 @@ Zotero ──(PROXY_USER/PROXY_PASS)──▶ proxy :8080 ──(PCLOUD_USER/PCL
 
 - Requests without valid proxy credentials get `401` and never reach pCloud.
 - Paths are mapped under `PCLOUD_ROOT`. WebDAV URLs outside the request line are mapped too: the `Destination` header on `MOVE`/`COPY`, the `Location` header, and the `href`s in `PROPFIND` (multistatus) responses. So Zotero only ever sees paths relative to the proxy.
+- `GET /healthz` answers `200 ok` without credentials and without contacting pCloud, for container health checks. Every other path needs the proxy credentials.
 - Each request gets an ID, returned in `X-Request-ID` and included in every log line for that request. Logs contain the method, path and status, never credentials.
 
 ## Configuration
