@@ -58,7 +58,28 @@ func run(ctx context.Context, srv *http.Server, ln net.Listener) error {
 	return nil
 }
 
+// Checks a running proxy's health and exits 0 if it is healthy, 1 otherwise. Only
+// LISTEN_ADDR is read, so the check works without the pCloud credentials.
+func healthcheck() int {
+	listenAddr, err := parseListenAddr(os.Getenv("LISTEN_ADDR"))
+	if err == nil {
+		err = checkHealth(context.Background(), listenAddr)
+	}
+	if err != nil {
+		log.Printf("Unhealthy: %v", err)
+		return 1
+	}
+	return 0
+}
+
 func main() {
+	if len(os.Args) > 1 {
+		if os.Args[1] != "healthcheck" || len(os.Args) > 2 {
+			log.Fatalf("usage: %s [healthcheck]", os.Args[0])
+		}
+		os.Exit(healthcheck())
+	}
+
 	cfg, err := loadConfig(os.Getenv)
 	if err != nil {
 		log.Fatal(err)
