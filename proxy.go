@@ -37,15 +37,19 @@ func handleUpstreamError(w http.ResponseWriter, r *http.Request, err error) {
 	http.Error(w, "Bad Gateway", http.StatusBadGateway)
 }
 
+// Builds the transport to pCloud from Go's default one, which brings dial and TLS
+// handshake timeouts and honours HTTPS_PROXY, plus a bound on waiting for headers
+func newUpstreamTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 30 * time.Second
+	t.IdleConnTimeout = 90 * time.Second
+	return t
+}
+
 func NewReverseProxy(user, pass string, target *url.URL, root string) http.Handler {
 	upstream := *target
 	upstream.Path = root
 	upstream.RawPath = ""
-
-	customTransport := &http.Transport{
-		ResponseHeaderTimeout: 30 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-	}
 
 	p := &webdavProxy{upstream: &upstream, rootSegments: strings.Split(root, "/")}
 	p.proxy = &httputil.ReverseProxy{
@@ -63,7 +67,7 @@ func NewReverseProxy(user, pass string, target *url.URL, root string) http.Handl
 				r.Out.Header.Del("Accept-Encoding")
 			}
 		},
-		Transport:      customTransport,
+		Transport:      newUpstreamTransport(),
 		ErrorHandler:   handleUpstreamError,
 		ModifyResponse: p.modifyResponse,
 	}
